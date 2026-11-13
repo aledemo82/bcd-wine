@@ -4000,6 +4000,30 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
         UNICODE_STRING alt;
         const WCHAR *base = libname, *p;
         for (p = libname; *p; p++) if (*p == '\\' || *p == '/') base = p + 1;
+
+        /* Experimental Madeira COMCTL32 v6 fallback for mixed-arch games.
+         * Only try this when the ordinary lookup has already failed; preserve
+         * the original sysx64 fallback if the v6 image is unavailable. */
+        if (!wcsicmp( base, L"comctl32.dll" ))
+        {
+            static const WCHAR v6W[] = L"\\??\\C:\\windows\\sysx64\\comctl32_v6.dll";
+            UNICODE_STRING v6;
+            RtlInitUnicodeString( &v6, v6W );
+            if (!open_dll_file( &v6, pwm, mapping, image_info, id ))
+            {
+                if (nt_name->Buffer) RtlFreeUnicodeString( nt_name );
+                nt_name->Buffer = NULL;
+                if (RtlCreateUnicodeString( nt_name, v6W ))
+                {
+                    ERR( "mixed-arch COMCTL32 v6 fallback: %s -> %s\n",
+                         debugstr_w(libname), debugstr_w(v6W) );
+                    status = STATUS_SUCCESS;
+                    goto done_mixed_arch_fallback;
+                }
+                status = STATUS_NO_MEMORY;
+                goto done_mixed_arch_fallback;
+            }
+        }
         if (wcslen( base ) + ARRAY_SIZE( sysx64W ) + 4 < MAX_PATH)
         {
             wcscpy( buf, sysx64W );
@@ -4018,6 +4042,7 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
             }
         }
     }
+done_mixed_arch_fallback:
 #endif
 
     RtlFreeHeap( GetProcessHeap(), 0, fullname );
